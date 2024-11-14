@@ -1,114 +1,91 @@
-#PARA GITHUB
-#Dashboard financiero
-
-#tpdps los import de paqeuetes
 import dash
 from dash import dcc
 from dash import html
-from dash import dash_table
 from dash.dependencies import Input, Output
 import plotly.express as px
 import pandas as pd
-import pathlib
 import dash_bootstrap_components as dbc
+import pathlib
+import datetime
 
 
-#iniciar el dash
+# Iniciar la app
 app = dash.Dash(external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 #agregar linea de server para git:
 server=app.server
 
-app.title="Dashboard Financiero"
+# Cargar datos
+price_data = pd.read_csv("stock_prices.csv", parse_dates=['Date'], index_col='Date')
+returns_data = pd.read_csv("stock_returns.csv", parse_dates=['Date'], index_col='Date')
+returns_data3 = pd.read_csv("returns_data3.csv", parse_dates=['Date'], index_col='Date')
+returns_data4 = pd.read_csv("returns_data4.csv", parse_dates=['Date'], index_col='Date')
 
-#data a usar:
-#para que sirva en git tiene qeu estar 
-df=pd.read_csv("empresas.csv")
+stocks = ["COST", "ROST", "MMM","PG", "GE", "RTX"]
 
-#armar lista de las variables a usar
-
-sales_list = ["Total Revenues", "Cost of Revenues", "Gross Profit", "Total Operating Expenses",
-             "Operating Income", "Net Income", "Shares Outstanding", "Close Stock Price",
-             "Market Cap", "Multiple of Revenue"]
-
-#app layout
+#rango de fechas a importat
+end_date = datetime.datetime(2024, 11, 12)
+start_date= datetime.datetime(2021, 11, 15)
 
 app.layout = html.Div([
-
-    #html de fila con dropdowns
-    html.Div([html.Div([
-        #html del primer dropdown para elegir las empresas que quiero ver en el dashboard
-        html.Div(dcc.Dropdown(
-            id="stockdropdown", value =["Amazon", "Tesla", "Microsoft", "Apple", "Google"],clearable=False, multi=True,
-            options=[{"label":x, "value":x} for x in sorted(df.Company.unique())]),
-            className="six columns", style={"width":"50%"}),
-        #html del segundo dropdwon para eleig que variable numerica financiera quier ver en el desahboard:
-        html.Div(dcc.Dropdown(
-            id="numericdropdown", value="Total Revenues", clearable=False,
-            options=[{"label":x, "value":x} for x in sales_list]), className="six columns",
-            style={"width":"50%"})
-    #este cierra la fila y lleva classnmae row:
-    ], className="row"), ], className="custom-dropdown"),
-
-    #Html de las graficas
-    html.Div([dcc.Graph(id="bar", figure={})]),
-
-    html.Div([dcc.Graph(id="boxplot", figure={})]),
-
-    html.Div(html.Div(id="table-container_1"), style={"marginBottom":"15px", "marginTop":"0px"}),
+    html.H1("Dashboard Caso Final"),
+    
+    
+    html.Label("Select Stock"),
+    dcc.Dropdown(id='stock-dropdown', options=[{'label': stock, 'value': stock} for stock in stocks], value=stocks[0], multi=True),
+    
+    
+    html.Label("Select Data Type"),
+    dcc.Dropdown(id='data-type-dropdown', options=[
+        {'label': 'Price', 'value': 'price'},
+        {'label': 'Return', 'value': 'return'}
+    ], value='price'),
+    
+    # Slicer para el rango de fechas
+    dcc.DatePickerRange(
+        id='date-range',
+        start_date=start_date,
+        end_date=end_date,
+        display_format='YYYY-MM-DD'
+    ),
+    
+    # Gráfico
+    dcc.Graph(id='stock-graph'),
+    dcc.Graph(id='histogram1'),
+    dcc.Graph(id='histogram2')
 ])
 
-#callback para actualizar la gráfica y la tabla
+# Callback para actualizar el gráfico
 @app.callback(
-    #Output con todo lo que devuelve el app: las 2 graficas actualziadas en modo figure y la tabla:
-    [Output("bar","figure"), Output("boxplot", "figure"), Output("table-container_1", "children")],
-    [Input("stockdropdown", "value"), Input("numericdropdown", "value")]
-    
+    [Output('stock-graph', 'figure'),
+     Output('histogram1','figure'),
+     Output('histogram2', 'figure')],
+    [Input('stock-dropdown', 'value'),
+     Input('data-type-dropdown', 'value'),
+     Input('date-range', 'start_date'),
+     Input('date-range', 'end_date')]
 )
+def update_graph(selected_stocks, data_type, start_date, end_date):
+    # Filtrar los datos por el rango de fechas
+    filtered_data = price_data.loc[start_date:end_date, selected_stocks]
+    if data_type == 'return':
+        filtered_data = returns_data.loc[start_date:end_date, selected_stocks]
+    
+    # Crear la figura
+    fig = px.line(filtered_data, x=filtered_data.index, y=filtered_data.columns)
+    fig.update_layout(title="Precio y Retornos de la Acción", xaxis_title="Fecha", yaxis_title="Value")
 
-#definición par armar las graficas y la tabla:
-#esto solo se hace por como viene este dataset, no se hace siempre
-def display_value(selected_stock, selected_numeric):
-    if len(selected_stock)==0:
-        dfv_fltrd=df[df["Company"].isin(["Amazon", "Tesla", "Microsoft", "Apple", "Google"])]
-    else:
-        dfv_fltrd=df[df["Company"].isin(selected_stock)]
-
-    #haer la primera gráfica de lineas
-    fig=px.line(dfv_fltrd, color="Company", x="Quarter", markers=True, y=selected_numeric,
-               width=1000, height=500)
-    #hacer titulo de la grafica variable:
-    fig.update_layout(title=f"{selected_numeric} de {selected_stock}",
-                     xaxis_title="Quarters")
-
-    fig.update_traces(line=dict(width=2))
-
-#grafica de boxplot
-    fig2=px.box(dfv_fltrd, color="Company", x="Company", y=selected_numeric, width=1000, height=500)
-
-    fig2.update_layout(title=f"{selected_numeric} de {selected_stock}")
-
-    #modificar el dataframe para poder hacerlo una tabla 
-    df_reshaped = dfv_fltrd.pivot(index="Company", columns="Quarter", values=selected_numeric)
-    df_reshaped2 = df_reshaped.reset_index()
-
-#forma en que se despliegta la tabla
-    return (fig, fig2,
-          dash_table.DataTable(columns=[{"name":i,"id":i} for i in df_reshaped2.columns],
-                              data=df_reshaped2.to_dict("records"),
-                              export_format="csv", #para guardar en csv la tabla
-                              fill_width=True,
-                              style_cell={"font-size":"12px"},
-                              style_table={"maxWidth":1000},
-                              style_header={"backgroundColor":"blue",
-                                           "color":"white"},
-                              style_data_conditional= [{"backgroundColor":"white",
-                                                     "color":"black"},
-                            ]))
+    print("Inforeturns_data3", returns_data3.head())
+    print("Inforeturns_data4", returns_data4.head())
+    
+    #crear histogramas
+    fig2= px.histogram(returns_data3, x="Portfolio")
+    fig3 = px.histogram(returns_data4, x="Portfolio")
+    
+    return (fig,fig2,fig3)
 
 #set server y correr el app
 
 #para GITHUB agregar el host y debug
 if __name__=="__main__":
-    app.run_server(debug=False, host="0.0.0.0",port=10000)
-    
+    app.run_server(debug=False, host="0.0.0.0",port=67000)
